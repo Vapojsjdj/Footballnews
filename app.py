@@ -1,9 +1,8 @@
-from flask import Flask, render_template_string, request, send_file
+from flask import Flask, render_template_string, request, render_template
 import requests
 import re
 import time
-import os
-from datetime import datetime 
+import json
 
 app = Flask(__name__)
 
@@ -47,6 +46,7 @@ def get_links(url):
             links = list(set(links))
         return links
     except Exception as e:
+        print(f"Error in get_links: {str(e)}")
         return []
 
 def get_article_content(url):
@@ -64,10 +64,13 @@ def get_article_content(url):
         for part in parts[1:]:
             try:
                 article = {}
+                
+                # استخراج العنوان
                 title_end = part.find('";')
                 if title_end != -1:
                     article['title'] = part[:title_end]
                 
+                # استخراج المحتوى
                 content_start = part.find('var article_content = "')
                 if content_start != -1:
                     content_start += len('var article_content = "')
@@ -77,8 +80,18 @@ def get_article_content(url):
                         content = content.replace('\\n', '\n').replace('\\"', '"').strip()
                         article['content'] = content
                 
+                # استخراج الصور
                 article['images'] = extract_images(part)
                 
+                # استخراج التاريخ
+                date_start = part.find('var article_date = "')
+                if date_start != -1:
+                    date_start += len('var article_date = "')
+                    date_end = part.find('";', date_start)
+                    if date_end != -1:
+                        article['date'] = part[date_start:date_end]
+                
+                # استخراج المقالات ذات الصلة
                 related_start = part.find('var article_related = new Array (')
                 if related_start != -1:
                     related_end = part.find(');', related_start)
@@ -110,323 +123,90 @@ def get_article_content(url):
                     articles.append(article)
                     
             except Exception as e:
+                print(f"Error processing article part: {str(e)}")
                 continue
                 
         return articles
         
     except Exception as e:
+        print(f"Error in get_article_content: {str(e)}")
         return []
 
-def generate_html_file(articles):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f'articles_{timestamp}.html'
-    
-    html_content = """
-    <!DOCTYPE html>
-    <html dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>المقالات المستخرجة</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                margin: 20px;
-                background-color: #ffffff;
-            }
-            .article {
-                margin: 20px 0;
-                padding: 15px;
-                border-bottom: 1px solid #eee;
-            }
-            .article-title {
-                color: #1a0dab;
-                font-size: 24px;
-                margin-bottom: 10px;
-            }
-            .article-content {
-                line-height: 1.6;
-                margin: 15px 0;
-            }
-            .images-section {
-                margin: 15px 0;
-                padding: 10px;
-                background: #f5f5f5;
-            }
-            .related-articles {
-                margin: 15px 0;
-                padding: 10px;
-                background: #f5f5f5;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-    """
-    
-    for article in articles:
-        html_content += f"""
-            <div class="article">
-                <h2 class="article-title">{article['title']}</h2>
-                <div class="article-content">{article['content']}</div>
-        """
-        
-        if article.get('images'):
-            html_content += """
-                <div class="images-section">
-                    <h3>الصور:</h3>
-            """
-            for img in article['images']:
-                html_content += f"""
-                    <div>
-                        <p>الوصف: {img['caption']}</p>
-                        <p>الرابط: {img['url']}</p>
-                    </div>
-                """
-            html_content += "</div>"
-        
-        if article.get('related_articles'):
-            html_content += """
-                <div class="related-articles">
-                    <h3>المقالات ذات الصلة:</h3>
-            """
-            for related in article['related_articles']:
-                html_content += f"""
-                    <p><a href="{related['url']}" target="_blank">{related['title']}</a></p>
-                """
-            html_content += "</div>"
-        
-        html_content += "</div>"
-    
-    html_content += """
-        </div>
-    </body>
-    </html>
-    """
-    
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
-    
-    file_path = os.path.join('downloads', filename)
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    
-    return file_path
+def save_articles_to_file(articles):
+    try:
+        with open('articles_data.json', 'w', encoding='utf-8') as f:
+            json.dump(articles, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving articles: {str(e)}")
+        return False
 
-main_template = """
-<!DOCTYPE html>
-<html dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>استخراج المقالات</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f0f0f0;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        .url-input {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            direction: ltr;
-        }
-        .button-group {
-            margin: 10px 0;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-left: 10px;
-        }
-        .download-btn {
-            background-color: #2196F3;
-        }
-        .article {
-            margin: 20px 0;
-            padding: 15px;
-            background: #f9f9f9;
-            border-radius: 8px;
-        }
-        .images-section {
-            margin: 15px 0;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 4px;
-        }
-        .related-articles {
-            margin: 15px 0;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 4px;
-        }
-        .article-content {
-            white-space: pre-line;
-            line-height: 1.6;
-        }
-        #status {
-            margin: 10px 0;
-            color: #666;
-        }
-        .loading {
-            display: none;
-            margin: 10px 0;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>استخراج المقالات</h2>
-        <input type="text" id="urlInput" class="url-input" placeholder="أدخل رابط الصفحة هنا...">
-        <div class="button-group">
-            <button onclick="processURL()">استخراج المقالات</button>
-            <button class="download-btn" onclick="downloadHTML()" id="downloadBtn" disabled>تحميل HTML</button>
-        </div>
-        <div id="status"></div>
-        <div id="loading" class="loading">جاري التحميل...</div>
-        <div id="result"></div>
-    </div>
-
-    <script>
-        let currentArticles = null;
-
-        function processURL() {
-            const url = document.getElementById('urlInput').value.trim();
-            if (!url) {
-                alert('الرجاء إدخال رابط صحيح');
-                return;
-            }
-
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('result').innerHTML = '';
-            document.getElementById('status').innerHTML = '';
-            document.getElementById('downloadBtn').disabled = true;
-
-            fetch('/process', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'url=' + encodeURIComponent(url)
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('loading').style.display = 'none';
-                
-                if (data.error) {
-                    document.getElementById('status').innerHTML = 'حدث خطأ: ' + data.error;
-                    return;
-                }
-
-                currentArticles = data.articles;
-                let resultHTML = '';
-                if (data.articles && data.articles.length > 0) {
-                    document.getElementById('downloadBtn').disabled = false;
-                    
-                    data.articles.forEach((article, index) => {
-                        resultHTML += `
-                            <div class="article">
-                                <h3>${article.title}</h3>
-                                
-                                ${article.images && article.images.length > 0 ? `
-                                    <div class="images-section">
-                                        <h4>الصور:</h4>
-                                        ${article.images.map(img => `
-                                            <div>
-                                                <p>الوصف: ${img.caption}</p>
-                                                <p>الرابط: ${img.url}</p>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                ` : ''}
-                                
-                                <div class="article-content">${article.content}</div>
-                                
-                                ${article.related_articles && article.related_articles.length > 0 ? `
-                                    <div class="related-articles">
-                                        <h4>المقالات ذات الصلة:</h4>
-                                        ${article.related_articles.map(related => `
-                                            <div>
-                                                <a href="${related.url}" target="_blank">${related.title}</a>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    });
-                    document.getElementById('status').innerHTML = `تم العثور على ${data.articles.length} مقال`;
-                } else {
-                    document.getElementById('status').innerHTML = 'لم يتم العثور على مقالات';
-                }
-                
-                document.getElementById('result').innerHTML = resultHTML;
-            })
-            .catch(error => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('status').innerHTML = 'حدث خطأ أثناء المعالجة';
-            });
-        }
-
-        function downloadHTML() {
-            if (!currentArticles) return;
-            
-            fetch('/download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ articles: currentArticles })
-            })
-            .then(response => response.blob())
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `articles_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.html`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
-            })
-            .catch(error => {
-                alert('حدث خطأ أثناء تحميل الملف');
-            });
-        }
-    </script>
-</body>
-</html>
-"""
+def load_articles_from_file():
+    try:
+        with open('articles_data.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return []
 
 @app.route('/')
 def home():
     return render_template_string(main_template)
+
+@app.route('/articles')
+def articles():
+    return render_template('articles.html')
+
+@app.route('/get_articles')
+def get_articles():
+    try:
+        # محاولة تحميل المقالات المحفوظة
+        cached_articles = load_articles_from_file()
+        
+        # التحقق من وقت آخر تحديث
+        current_time = time.time()
+        last_update = getattr(app, 'last_update', 0)
+        
+        # تحديث المقالات كل 5 دقائق
+        if not cached_articles or (current_time - last_update) > 300:
+            base_url = "https://m.kooora.com/?o=n"
+            all_articles = []
+            
+            links = get_links(base_url)
+            if not links:
+                links = [base_url]
+            
+            # معالجة أول 10 روابط
+            for link in links[:10]:
+                articles = get_article_content(link)
+                if articles:
+                    all_articles.extend(articles)
+                    if len(all_articles) >= 20:
+                        break
+            
+            if all_articles:
+                save_articles_to_file(all_articles)
+                app.last_update = current_time
+                return {"articles": all_articles}
+            else:
+                return {"articles": cached_articles}
+        else:
+            return {"articles": cached_articles}
+            
+    except Exception as e:
+        print(f"Error in get_articles route: {str(e)}")
+        return {"error": str(e)}
 
 @app.route('/process', methods=['POST'])
 def process():
     url = request.form.get('url')
     try:
         all_articles = []
+        
         links = get_links(url)
         if not links:
             links = [url]
         
-        for link in links:
+        for link in links[:5]:  # تحديد عدد الروابط للمعالجة
             articles = get_article_content(link)
             if articles:
                 all_articles.extend(articles)
@@ -435,17 +215,14 @@ def process():
     except Exception as e:
         return {"error": str(e)}
 
-@app.route('/download', methods=['POST'])
-def download():
-    try:
-        articles = request.json.get('articles', [])
-        if not articles:
-            return "No articles to download", 400
-        
-        file_path = generate_html_file(articles)
-        return send_file(file_path, as_attachment=True)
-    except Exception as e:
-        return str(e), 500
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('500.html'), 500
+
 
 if __name__ == "__main__":
     app.run()
