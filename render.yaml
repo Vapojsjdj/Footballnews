@@ -1,9 +1,11 @@
 services:
   - type: web
-    name: flask-app
-    runtime: python
+    name: footballnews
+    env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app
+    startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11
+        value: 3.9
+      - key: PORT
+        value: 8080
