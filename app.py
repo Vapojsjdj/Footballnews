@@ -1,200 +1,211 @@
-from flask import Flask, render_template_string, request, render_template
+from flask import Flask, render_template_string, request
 import requests
 import re
-import time
 import json
+import os
+import time
 
 app = Flask(__name__)
 
-def extract_images(text):
-    images = []
-    image_start = text.find('var article_images = new Array (')
-    if image_start != -1:
-        image_end = text.find(');', image_start)
-        if image_end != -1:
-            image_text = text[image_start + len('var article_images = new Array ('):image_end]
-            image_items = image_text.split(',')
-            
-            i = 0
-            while i < len(image_items)-1:
-                try:
-                    image_url = image_items[i].strip(' "\n')
-                    image_caption = image_items[i+1].strip(' "\n')
-                    if image_url and not image_url.isdigit():
-                        images.append({
-                            'url': image_url,
-                            'caption': image_caption
-                        })
-                    i += 2
-                except:
-                    i += 1
-    return images
+# تأكد من وجود ملف للتخزين
+STORAGE_FILE = 'articles_storage.json'
 
-def get_links(url):
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        response = requests.get(url, headers=headers)
-        response.encoding = 'utf-8'
-        content = response.text
-        
-        matches = re.findall(r'n=\d+', content)
-        links = []
-        if matches:
-            links = [f'https://m.kooora.com/?n={match.replace("n=", "")}&pg=1&o=n' for match in matches]
-            links = list(set(links))
-        return links
-    except Exception as e:
-        print(f"Error in get_links: {str(e)}")
-        return []
-
-def get_article_content(url):
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8'
-        page_content = response.text
-        
-        articles = []
-        parts = page_content.split('var article_title = "')
-        
-        for part in parts[1:]:
-            try:
-                article = {}
-                
-                # استخراج العنوان
-                title_end = part.find('";')
-                if title_end != -1:
-                    article['title'] = part[:title_end]
-                
-                # استخراج المحتوى
-                content_start = part.find('var article_content = "')
-                if content_start != -1:
-                    content_start += len('var article_content = "')
-                    content_end = part.find('";', content_start)
-                    if content_end != -1:
-                        content = part[content_start:content_end]
-                        content = content.replace('\\n', '\n').replace('\\"', '"').strip()
-                        article['content'] = content
-                
-                # استخراج الصور
-                article['images'] = extract_images(part)
-                
-                # استخراج التاريخ
-                date_start = part.find('var article_date = "')
-                if date_start != -1:
-                    date_start += len('var article_date = "')
-                    date_end = part.find('";', date_start)
-                    if date_end != -1:
-                        article['date'] = part[date_start:date_end]
-                
-                # استخراج المقالات ذات الصلة
-                related_start = part.find('var article_related = new Array (')
-                if related_start != -1:
-                    related_end = part.find(');', related_start)
-                    if related_end != -1:
-                        related_text = part[related_start + len('var article_related = new Array ('):related_end]
-                        related_items = related_text.split(',')
-                        
-                        related_articles = []
-                        i = 0
-                        while i < len(related_items)-2:
-                            try:
-                                article_id = related_items[i].strip()
-                                article_title = related_items[i+1].strip(' "')
-                                article_url = related_items[i+2].strip(' "')
-                                
-                                if article_id and article_title:
-                                    related_articles.append({
-                                        'id': article_id,
-                                        'title': article_title,
-                                        'url': article_url
-                                    })
-                                i += 3
-                            except:
-                                i += 1
-                        
-                        article['related_articles'] = related_articles
-                
-                if article.get('title') and article.get('content'):
-                    articles.append(article)
-                    
-            except Exception as e:
-                print(f"Error processing article part: {str(e)}")
-                continue
-                
-        return articles
-        
-    except Exception as e:
-        print(f"Error in get_article_content: {str(e)}")
-        return []
-
-def save_articles_to_file(articles):
-    try:
-        with open('articles_data.json', 'w', encoding='utf-8') as f:
-            json.dump(articles, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        print(f"Error saving articles: {str(e)}")
-        return False
-
-def load_articles_from_file():
-    try:
-        with open('articles_data.json', 'r', encoding='utf-8') as f:
+def load_saved_articles():
+    if os.path.exists(STORAGE_FILE):
+        with open(STORAGE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except:
-        return []
+    return []
+
+def save_articles(articles):
+    with open(STORAGE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(articles, f, ensure_ascii=False, indent=4)
+
+# [باقي الدوال الموجودة تبقى كما هي: extract_images, get_links, get_article_content]
+
+main_template = """
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>استخراج المقالات</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .url-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            direction: ltr;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        .clear-button {
+            background-color: #f44336;
+        }
+        .article {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        .images-section {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .related-articles {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .article-content {
+            white-space: pre-line;
+            line-height: 1.6;
+        }
+        #status {
+            margin: 10px 0;
+            color: #666;
+        }
+        .loading {
+            display: none;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>استخراج المقالات</h2>
+        <input type="text" id="urlInput" class="url-input" placeholder="أدخل رابط الصفحة هنا...">
+        <button onclick="processURL()">استخراج المقالات</button>
+        <button onclick="clearArticles()" class="clear-button">مسح جميع المقالات</button>
+        <div id="status"></div>
+        <div id="loading" class="loading">جاري التحميل...</div>
+        <div id="savedArticles">{{ saved_articles_html|safe }}</div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function processURL() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (!url) {
+                alert('الرجاء إدخال رابط صحيح');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').innerHTML = '';
+            document.getElementById('status').innerHTML = '';
+
+            fetch('/process', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'url=' + encodeURIComponent(url)
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                if (data.error) {
+                    document.getElementById('status').innerHTML = 'حدث خطأ: ' + data.error;
+                    return;
+                }
+                // تحديث الصفحة لعرض المقالات المحفوظة
+                window.location.reload();
+            })
+            .catch(error => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').innerHTML = 'حدث خطأ أثناء المعالجة';
+            });
+        }
+
+        function clearArticles() {
+            if (confirm('هل أنت متأكد من رغبتك في مسح جميع المقالات المحفوظة؟')) {
+                fetch('/clear', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    window.location.reload();
+                });
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+def generate_articles_html(articles):
+    html = ""
+    for article in articles:
+        html += f"""
+            <div class="article">
+                <h3>{article['title']}</h3>
+        """
+        
+        if article.get('images'):
+            html += """
+                <div class="images-section">
+                    <h4>الصور:</h4>
+            """
+            for img in article['images']:
+                html += f"""
+                    <div>
+                        <p>الوصف: {img['caption']}</p>
+                        <p>الرابط: {img['url']}</p>
+                    </div>
+                """
+            html += "</div>"
+        
+        html += f"""
+            <div class="article-content">{article['content']}</div>
+        """
+        
+        if article.get('related_articles'):
+            html += """
+                <div class="related-articles">
+                    <h4>المقالات ذات الصلة:</h4>
+            """
+            for related in article['related_articles']:
+                html += f"""
+                    <div>
+                        <a href="{related['url']}" target="_blank">{related['title']}</a>
+                    </div>
+                """
+            html += "</div>"
+        
+        html += "</div>"
+    
+    return html
 
 @app.route('/')
 def home():
-    return render_template_string(main_template)
-
-@app.route('/articles')
-def articles():
-    return render_template('articles.html')
-
-@app.route('/get_articles')
-def get_articles():
-    try:
-        # محاولة تحميل المقالات المحفوظة
-        cached_articles = load_articles_from_file()
-        
-        # التحقق من وقت آخر تحديث
-        current_time = time.time()
-        last_update = getattr(app, 'last_update', 0)
-        
-        # تحديث المقالات كل 5 دقائق
-        if not cached_articles or (current_time - last_update) > 300:
-            base_url = "https://m.kooora.com/?o=n"
-            all_articles = []
-            
-            links = get_links(base_url)
-            if not links:
-                links = [base_url]
-            
-            # معالجة أول 10 روابط
-            for link in links[:10]:
-                articles = get_article_content(link)
-                if articles:
-                    all_articles.extend(articles)
-                    if len(all_articles) >= 20:
-                        break
-            
-            if all_articles:
-                save_articles_to_file(all_articles)
-                app.last_update = current_time
-                return {"articles": all_articles}
-            else:
-                return {"articles": cached_articles}
-        else:
-            return {"articles": cached_articles}
-            
-    except Exception as e:
-        print(f"Error in get_articles route: {str(e)}")
-        return {"error": str(e)}
+    saved_articles = load_saved_articles()
+    saved_articles_html = generate_articles_html(saved_articles)
+    return render_template_string(main_template, saved_articles_html=saved_articles_html)
 
 @app.route('/process', methods=['POST'])
 def process():
@@ -202,27 +213,32 @@ def process():
     try:
         all_articles = []
         
+        # استخراج الروابط أولاً
         links = get_links(url)
         if not links:
             links = [url]
         
-        for link in links[:5]:  # تحديد عدد الروابط للمعالجة
+        # استخراج المقالات من كل رابط
+        for link in links:
             articles = get_article_content(link)
             if articles:
                 all_articles.extend(articles)
         
-        return {"articles": all_articles}
+        # حفظ المقالات الجديدة مع المقالات القديمة
+        saved_articles = load_saved_articles()
+        saved_articles.extend(all_articles)
+        save_articles(saved_articles)
+        
+        return {"success": True}
     except Exception as e:
         return {"error": str(e)}
 
-@app.errorhandler(404)
-def page_not_found(e):
-    return render_template('404.html'), 404
-
-@app.errorhandler(500)
-def internal_server_error(e):
-    return render_template('500.html'), 500
+@app.route('/clear', methods=['POST'])
+def clear_articles():
+    if os.path.exists(STORAGE_FILE):
+        os.remove(STORAGE_FILE)
+    return {"success": True}
 
 
-if __name__ == "__main__":
+ if __name__ == "__main__":
     app.run()
