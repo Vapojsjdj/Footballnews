@@ -3,7 +3,7 @@ import requests
 import re
 import time
 import os
-from datetime import datetime
+from datetime import datetime 
 
 app = Flask(__name__)
 
@@ -447,5 +447,5 @@ def download():
     except Exception as e:
         return str(e), 500
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080, debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
